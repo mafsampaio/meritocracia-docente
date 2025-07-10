@@ -1,0 +1,1382 @@
+import { db } from "@db";
+import * as schema from "@shared/schema";
+import { eq, and, desc, gte, lte, sql, count, avg, sum, gt, lt } from "drizzle-orm";
+import bcrypt from "bcrypt";
+
+export const storage = {
+  // Valores Fixos
+  async getValoresFixos() {
+    try {
+      // Tentar criar a tabela se ela não existir
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS valores_fixos (
+          id SERIAL PRIMARY KEY,
+          receita_por_aluno DECIMAL(10,2) NOT NULL,
+          custo_fixo_por_aula DECIMAL(10,2) NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+      
+      // Verifique se há registros na tabela
+      const registros = await db.execute(sql`SELECT COUNT(*) FROM valores_fixos`);
+      const count = parseInt(registros.rows[0].count);
+      
+      // Se não houver registros, insira um valor padrão
+      if (count === 0) {
+        await db.execute(sql`
+          INSERT INTO valores_fixos (receita_por_aluno, custo_fixo_por_aula)
+          VALUES ('28.00', '78.00')
+        `);
+      }
+      
+      // Busque o valor mais recente
+      const valores = await db.execute(sql`
+        SELECT * FROM valores_fixos 
+        ORDER BY updated_at DESC 
+        LIMIT 1
+      `);
+      
+      if (valores.rows.length > 0) {
+        return {
+          id: valores.rows[0].id,
+          receitaPorAluno: valores.rows[0].receita_por_aluno,
+          custoFixoPorAula: valores.rows[0].custo_fixo_por_aula,
+          createdAt: valores.rows[0].created_at,
+          updatedAt: valores.rows[0].updated_at
+        };
+      }
+      
+      return { receitaPorAluno: "28.00", custoFixoPorAula: "78.00" };
+    } catch (error) {
+      console.error("Erro ao acessar valores fixos:", error);
+      return { receitaPorAluno: "28.00", custoFixoPorAula: "78.00" };
+    }
+  },
+
+  async criarOuAtualizarValoresFixos(data: schema.ValoresFixosInsert) {
+    try {
+      // Garantir que a tabela existe
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS valores_fixos (
+          id SERIAL PRIMARY KEY,
+          receita_por_aluno DECIMAL(10,2) NOT NULL,
+          custo_fixo_por_aula DECIMAL(10,2) NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+      
+      // Verificar se já existe algum registro
+      const result = await db.execute(sql`SELECT id FROM valores_fixos LIMIT 1`);
+      
+      if (result.rows.length > 0) {
+        const id = result.rows[0].id;
+        // Atualizar o registro existente
+        await db.execute(sql`
+          UPDATE valores_fixos 
+          SET receita_por_aluno = ${data.receitaPorAluno},
+              custo_fixo_por_aula = ${data.custoFixoPorAula},
+              updated_at = NOW()
+          WHERE id = ${id}
+        `);
+        
+        const updated = await db.execute(sql`SELECT * FROM valores_fixos WHERE id = ${id}`);
+        return [{
+          id: updated.rows[0].id,
+          receitaPorAluno: updated.rows[0].receita_por_aluno,
+          custoFixoPorAula: updated.rows[0].custo_fixo_por_aula,
+          createdAt: updated.rows[0].created_at,
+          updatedAt: updated.rows[0].updated_at
+        }];
+      } else {
+        // Criar um novo registro
+        const inserted = await db.execute(sql`
+          INSERT INTO valores_fixos (receita_por_aluno, custo_fixo_por_aula)
+          VALUES (${data.receitaPorAluno}, ${data.custoFixoPorAula})
+          RETURNING *
+        `);
+        
+        return [{
+          id: inserted.rows[0].id,
+          receitaPorAluno: inserted.rows[0].receita_por_aluno,
+          custoFixoPorAula: inserted.rows[0].custo_fixo_por_aula,
+          createdAt: inserted.rows[0].created_at,
+          updatedAt: inserted.rows[0].updated_at
+        }];
+      }
+    } catch (error) {
+      console.error("Erro ao criar/atualizar valores fixos:", error);
+      return [{
+        id: 1,
+        receitaPorAluno: data.receitaPorAluno,
+        custoFixoPorAula: data.custoFixoPorAula,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }];
+    }
+  },
+  // Usuários (Professores)
+  async getUserByEmail(email: string) {
+    return await db.query.professores.findFirst({
+      where: eq(schema.professores.email, email)
+    });
+  },
+
+  async getUserById(id: number) {
+    return await db.query.professores.findFirst({
+      where: eq(schema.professores.id, id)
+    });
+  },
+
+  async verifyPassword(password: string, hashedPassword: string) {
+    return await bcrypt.compare(password, hashedPassword);
+  },
+
+  async createUser(data: schema.ProfessorInsert & { senha: string }) {
+    const { senha, ...userData } = data;
+    const senhaHash = await bcrypt.hash(senha, 10);
+    
+    return await db.insert(schema.professores)
+      .values({ ...userData, senhaHash })
+      .returning();
+  },
+
+  async listUsers() {
+    return await db.query.professores.findMany({
+      orderBy: [schema.professores.nome]
+    });
+  },
+  
+  async updateUser(id: number, data: Partial<Omit<schema.ProfessorInsert, 'senhaHash'>> & { senha?: string }) {
+    const { senha, ...userData } = data;
+    let updateData = { ...userData };
+    
+    // Se senha foi fornecida, atualizar hash da senha
+    if (senha) {
+      const senhaHash = await bcrypt.hash(senha, 10);
+      updateData = { ...updateData, senhaHash };
+    }
+    
+    return await db.update(schema.professores)
+      .set(updateData)
+      .where(eq(schema.professores.id, id))
+      .returning();
+  },
+  
+  async deleteUser(id: number) {
+    return await db.delete(schema.professores)
+      .where(eq(schema.professores.id, id))
+      .returning();
+  },
+
+  // Modalidades
+  async listModalidades() {
+    return await db.query.modalidades.findMany({
+      orderBy: [schema.modalidades.nome]
+    });
+  },
+  
+  async criarModalidade(data: schema.ModalidadeInsert) {
+    return await db.insert(schema.modalidades)
+      .values(data)
+      .returning();
+  },
+  
+  async atualizarModalidade(id: number, data: Partial<schema.ModalidadeInsert>) {
+    return await db.update(schema.modalidades)
+      .set(data)
+      .where(eq(schema.modalidades.id, id))
+      .returning();
+  },
+  
+  async deletarModalidade(id: number) {
+    return await db.delete(schema.modalidades)
+      .where(eq(schema.modalidades.id, id))
+      .returning();
+  },
+
+  // Cargos
+  async listCargos() {
+    return await db.query.cargos.findMany({
+      orderBy: [schema.cargos.nome]
+    });
+  },
+  
+  async criarCargo(data: schema.CargoInsert) {
+    return await db.insert(schema.cargos)
+      .values(data)
+      .returning();
+  },
+  
+  async atualizarCargo(id: number, data: Partial<schema.CargoInsert>) {
+    return await db.update(schema.cargos)
+      .set(data)
+      .where(eq(schema.cargos.id, id))
+      .returning();
+  },
+  
+  async deletarCargo(id: number) {
+    return await db.delete(schema.cargos)
+      .where(eq(schema.cargos.id, id))
+      .returning();
+  },
+
+  // Patentes
+  async listPatentes() {
+    return await db.query.patentes.findMany({
+      orderBy: [schema.patentes.nome]
+    });
+  },
+  
+  async criarPatente(data: schema.PatenteInsert) {
+    return await db.insert(schema.patentes)
+      .values(data)
+      .returning();
+  },
+  
+  async atualizarPatente(id: number, data: Partial<schema.PatenteInsert>) {
+    return await db.update(schema.patentes)
+      .set(data)
+      .where(eq(schema.patentes.id, id))
+      .returning();
+  },
+  
+  async deletarPatente(id: number) {
+    return await db.delete(schema.patentes)
+      .where(eq(schema.patentes.id, id))
+      .returning();
+  },
+
+  // Aulas
+  async createAula(data: {
+    modalidadeId: number;
+    data: Date;
+    horaInicio: string;
+    capacidade: number;
+    professores: Array<{
+      professorId: number;
+      cargoId: number;
+      patenteId: number;
+    }>;
+  }) {
+    // Inserir aula
+    try {
+      // Inserir aula
+      const query = sql`
+        INSERT INTO aulas (data, hora_inicio, capacidade, modalidade_id)
+        VALUES (${data.data.toISOString()}, ${data.horaInicio}, ${data.capacidade}, ${data.modalidadeId})
+        RETURNING *
+      `;
+      
+      const result = await db.execute(query);
+      const novaAula = result.rows[0];
+      
+      // Inserir professores
+      if (data.professores && data.professores.length > 0) {
+        for (const professor of data.professores) {
+          await db.execute(sql`
+            INSERT INTO aula_professores (aula_id, professor_id, cargo_id, patente_id)
+            VALUES (${novaAula.id}, ${professor.professorId}, ${professor.cargoId}, ${professor.patenteId})
+          `);
+        }
+      }
+      
+      return novaAula;
+    } catch (error) {
+      console.error("Erro ao criar aula:", error);
+      throw error;
+    }
+  },
+
+  async getAulasDisponiveisCheckin() {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      // Obter aulas para hoje e futuro próximo (7 dias)
+      const endDate = new Date(today);
+      endDate.setDate(today.getDate() + 7);
+      
+      const query = sql`
+        SELECT a.id, a.data, a.hora_inicio, a.capacidade, m.nome as modalidade_nome 
+        FROM aulas a
+        INNER JOIN modalidades m ON a.modalidade_id = m.id
+        WHERE a.data >= ${today.toISOString()} AND a.data <= ${endDate.toISOString()}
+        ORDER BY a.data, a.hora_inicio
+      `;
+      
+      const result = await db.execute(query);
+      
+      return result.rows.map(a => ({
+        id: a.id,
+        data: a.data,
+        horaInicio: a.hora_inicio,
+        capacidade: a.capacidade,
+        modalidade: a.modalidade_nome
+      }));
+    } catch (error) {
+      console.error("Erro ao buscar aulas disponíveis para check-in:", error);
+      return [];
+    }
+  },
+  
+  async createAulasEmSerie(data: {
+    modalidadeId: number;
+    diasSemana: number[];
+    horaInicio: string;
+    dataInicio: Date;
+    dataFim: Date;
+    capacidade: number;
+    professores: Array<{
+      professorId: number;
+      cargoId: number;
+      patenteId: number;
+    }>;
+  }) {
+    try {
+      const aulasInseridas: any[] = [];
+      
+      // Configurar datas
+      const dataInicio = new Date(data.dataInicio);
+      const dataFim = new Date(data.dataFim);
+      dataInicio.setHours(0, 0, 0, 0);
+      dataFim.setHours(23, 59, 59, 999);
+      
+      // Verificar datas
+      if (dataInicio > dataFim) {
+        throw new Error("Data de início deve ser anterior à data de fim");
+      }
+      
+      // Verificar se há dias da semana selecionados
+      if (!data.diasSemana || data.diasSemana.length === 0) {
+        throw new Error("Selecione pelo menos um dia da semana");
+      }
+      
+      // Gerar todas as datas dentro do intervalo para os dias da semana selecionados
+      const datas: Date[] = [];
+      let currentDate = new Date(dataInicio);
+      
+      while (currentDate <= dataFim) {
+        const diaSemana = currentDate.getDay(); // 0 (domingo) a 6 (sábado)
+        
+        if (data.diasSemana.includes(diaSemana)) {
+          datas.push(new Date(currentDate));
+        }
+        
+        // Avançar para o próximo dia
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+      
+      console.log(`Gerando ${datas.length} aulas para os dias da semana selecionados`);
+      
+      // Verificar se não há duplicidade
+      for (const data_aula of datas) {
+        const aulas_existentes = await db.execute(sql`
+          SELECT * FROM aulas 
+          WHERE modalidade_id = ${data.modalidadeId} 
+          AND data = ${data_aula.toISOString()} 
+          AND hora_inicio = ${data.horaInicio}
+        `);
+        
+        if (aulas_existentes.rows.length > 0) {
+          continue; // Pular esta data pois já existe aula
+        }
+        
+        // Inserir aula
+        const query = sql`
+          INSERT INTO aulas (data, hora_inicio, capacidade, modalidade_id)
+          VALUES (${data_aula.toISOString()}, ${data.horaInicio}, ${data.capacidade}, ${data.modalidadeId})
+          RETURNING *
+        `;
+        
+        const result = await db.execute(query);
+        const novaAula = result.rows[0];
+        
+        // Inserir professores
+        if (data.professores && data.professores.length > 0) {
+          for (const professor of data.professores) {
+            await db.execute(sql`
+              INSERT INTO aula_professores (aula_id, professor_id, cargo_id, patente_id)
+              VALUES (${novaAula.id}, ${professor.professorId}, ${professor.cargoId}, ${professor.patenteId})
+            `);
+          }
+        }
+        
+        aulasInseridas.push(novaAula);
+      }
+      
+      return {
+        totalAulas: aulasInseridas.length,
+        aulas: aulasInseridas
+      };
+    } catch (error) {
+      console.error("Erro ao criar aulas em série:", error);
+      throw error;
+    }
+  },
+  
+  async getAllAulas(params: { 
+    modalidadeId?: number, 
+    diaSemana?: string, 
+    dataInicio?: string, 
+    dataFim?: string 
+  }) {
+    try {
+      let query = sql`
+        SELECT 
+          a.id, 
+          a.data, 
+          a.hora_inicio, 
+          a.capacidade, 
+          a.alunos_presentes,
+          m.nome as modalidade_nome,
+          m.id as modalidade_id
+        FROM aulas a
+        INNER JOIN modalidades m ON a.modalidade_id = m.id
+      `;
+      
+      const conditions = [];
+      
+      if (params.modalidadeId) {
+        conditions.push(sql`m.id = ${params.modalidadeId}`);
+      }
+      
+      if (params.diaSemana) {
+        // PostgreSQL: 0 = domingo, 1 = segunda, etc.
+        // Converter nomes de dia da semana para números
+        const diasSemanaMap: {[key: string]: number} = {
+          'domingo': 0,
+          'segunda': 1,
+          'terca': 2,
+          'terça': 2,
+          'quarta': 3,
+          'quinta': 4,
+          'sexta': 5,
+          'sabado': 6,
+          'sábado': 6
+        };
+        
+        const diaSemanaNumero = diasSemanaMap[params.diaSemana.toLowerCase()];
+        if (diaSemanaNumero !== undefined) {
+          conditions.push(sql`EXTRACT(DOW FROM a.data) = ${diaSemanaNumero}`);
+        }
+      }
+      
+      if (params.dataInicio) {
+        conditions.push(sql`a.data >= ${params.dataInicio}`);
+      }
+      
+      if (params.dataFim) {
+        conditions.push(sql`a.data <= ${params.dataFim}`);
+      }
+      
+      if (conditions.length > 0) {
+        query = sql`${query} WHERE ${sql.join(conditions, sql` AND `)}`; 
+      }
+      
+      query = sql`${query} ORDER BY a.data, a.hora_inicio`;
+      
+      const result = await db.execute(query);
+      
+      // Obter professores para cada aula
+      const aulas = await Promise.all(result.rows.map(async (aula) => {
+        try {
+          const professoresQuery = sql`
+            SELECT 
+              p.id as professor_id,
+              p.nome as professor_nome,
+              c.nome as cargo_nome,
+              pt.nome as patente_nome
+            FROM aula_professores ap
+            JOIN professores p ON ap.professor_id = p.id
+            JOIN cargos c ON ap.cargo_id = c.id
+            JOIN patentes pt ON ap.patente_id = pt.id
+            WHERE ap.aula_id = ${aula.id}
+          `;
+          
+          const professoresResult = await db.execute(professoresQuery);
+          
+          return {
+            id: aula.id,
+            data: aula.data,
+            horaInicio: aula.hora_inicio,
+            capacidade: aula.capacidade,
+            alunosPresentes: aula.alunos_presentes || 0,
+            modalidade: aula.modalidade_nome,
+            modalidadeId: aula.modalidade_id,
+            professores: professoresResult.rows.map((p) => ({
+              id: p.professor_id,
+              nome: p.professor_nome,
+              cargo: p.cargo_nome,
+              patente: p.patente_nome
+            }))
+          };
+        } catch (error) {
+          console.error(`Erro ao buscar professores para aula ${aula.id}:`, error);
+          return {
+            id: aula.id,
+            data: aula.data,
+            horaInicio: aula.hora_inicio,
+            capacidade: aula.capacidade,
+            alunosPresentes: aula.alunos_presentes || 0,
+            modalidade: aula.modalidade_nome,
+            modalidadeId: aula.modalidade_id,
+            professores: []
+          };
+        }
+      }));
+      
+      return aulas;
+    } catch (error) {
+      console.error("Erro ao buscar todas as aulas:", error);
+      return [];
+    }
+  },
+
+  async getProfessoresDaAula(aulaId: number) {
+    return await db.select({
+      id: schema.professores.id,
+      nome: schema.professores.nome
+    })
+    .from(schema.aulaProfessores)
+    .innerJoin(
+      schema.professores,
+      eq(schema.aulaProfessores.professorId, schema.professores.id)
+    )
+    .where(eq(schema.aulaProfessores.aulaId, aulaId));
+  },
+
+  // Atualizações de aulas (check-in)
+  async atualizarAlunosPresentes(aulaId: number, alunosPresentes: number) {
+    return await db
+      .update(schema.aulas)
+      .set({ alunosPresentes })
+      .where(eq(schema.aulas.id, aulaId))
+      .returning();
+  },
+
+  async getAulasComPresenca(limit = 10) {
+    return await db.select({
+      id: schema.aulas.id,
+      data: schema.aulas.data,
+      horaInicio: schema.aulas.horaInicio,
+      modalidade: schema.modalidades.nome,
+      alunosPresentes: schema.aulas.alunosPresentes,
+      capacidade: schema.aulas.capacidade,
+      createdAt: schema.aulas.createdAt
+    })
+    .from(schema.aulas)
+    .innerJoin(schema.modalidades, eq(schema.aulas.modalidadeId, schema.modalidades.id))
+    .where(gt(schema.aulas.alunosPresentes, 0))
+    .orderBy(desc(schema.aulas.data), desc(schema.aulas.horaInicio))
+    .limit(limit);
+  },
+
+  async getAulasPresencaPorProfessor(professorId: number, limit = 10) {
+    return await db.select({
+      id: schema.aulas.id,
+      data: schema.aulas.data,
+      horaInicio: schema.aulas.horaInicio,
+      modalidade: schema.modalidades.nome,
+      alunosPresentes: schema.aulas.alunosPresentes,
+      capacidade: schema.aulas.capacidade,
+      createdAt: schema.aulas.createdAt
+    })
+    .from(schema.aulas)
+    .innerJoin(schema.modalidades, eq(schema.aulas.modalidadeId, schema.modalidades.id))
+    .innerJoin(schema.aulaProfessores, eq(schema.aulas.id, schema.aulaProfessores.aulaId))
+    .where(
+      and(
+        eq(schema.aulaProfessores.professorId, professorId),
+        gt(schema.aulas.alunosPresentes, 0)
+      )
+    )
+    .orderBy(desc(schema.aulas.data), desc(schema.aulas.horaInicio))
+    .limit(limit);
+  },
+
+  // Relatórios financeiros e métricas
+  async getDashboardMetrics(mesAno: string) {
+    // Processar mesAno no formato "MM/YYYY"
+    const [mes, ano] = mesAno.split('/').map(Number);
+    
+    // Calcular primeiro e último dia do mês
+    const dataInicio = new Date(ano, mes - 1, 1);
+    const dataFim = new Date(ano, mes, 0);
+    
+    // Formatar datas para o formato SQL
+    const dataInicioSQL = dataInicio.toISOString().split('T')[0];
+    const dataFimSQL = dataFim.toISOString().split('T')[0];
+    
+    // Calcular primeiro e último dia do mês anterior
+    const mesAnteriorDataInicio = new Date(ano, mes - 2, 1);
+    const mesAnteriorDataFim = new Date(ano, mes - 1, 0);
+    
+    // Formatar datas do mês anterior para o formato SQL
+    const mesAnteriorDataInicioSQL = mesAnteriorDataInicio.toISOString().split('T')[0];
+    const mesAnteriorDataFimSQL = mesAnteriorDataFim.toISOString().split('T')[0];
+    
+    // Obter total de aulas do mês atual
+    const totalAulasResult = await db.select({
+      count: count()
+    })
+    .from(schema.aulas)
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${dataInicioSQL}`),
+        lte(schema.aulas.data, sql`${dataFimSQL}`)
+      )
+    );
+    
+    const totalAulas = totalAulasResult[0]?.count || 0;
+    
+    // Obter total de aulas do mês anterior
+    const totalAulasAnteriorResult = await db.select({
+      count: count()
+    })
+    .from(schema.aulas)
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${mesAnteriorDataInicioSQL}`),
+        lte(schema.aulas.data, sql`${mesAnteriorDataFimSQL}`)
+      )
+    );
+    
+    const totalAulasAnterior = totalAulasAnteriorResult[0]?.count || 0;
+    
+    // Calcular crescimento de aulas
+    const crescimentoAulas = totalAulasAnterior > 0 
+      ? Math.round(((totalAulas - totalAulasAnterior) / totalAulasAnterior) * 100) 
+      : 0;
+    
+    // Obter ocupação média (quantidade de alunos / capacidade) do mês atual
+    const ocupacaoResult = await db.select({
+      ocupacaoMedia: sql`COALESCE(AVG((${schema.aulas.alunosPresentes} * 100.0) / ${schema.aulas.capacidade}), 0)`.mapWith(Number)
+    })
+    .from(schema.aulas)
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${dataInicioSQL}`),
+        lte(schema.aulas.data, sql`${dataFimSQL}`),
+        gt(schema.aulas.alunosPresentes, 0)
+      )
+    );
+    
+    const ocupacaoMedia = Math.round(ocupacaoResult[0]?.ocupacaoMedia || 0);
+    
+    // Obter ocupação média do mês anterior
+    const ocupacaoAnteriorResult = await db.select({
+      ocupacaoMedia: sql`COALESCE(AVG((${schema.aulas.alunosPresentes} * 100.0) / ${schema.aulas.capacidade}), 0)`.mapWith(Number)
+    })
+    .from(schema.aulas)
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${mesAnteriorDataInicioSQL}`),
+        lte(schema.aulas.data, sql`${mesAnteriorDataFimSQL}`),
+        gt(schema.aulas.alunosPresentes, 0)
+      )
+    );
+    
+    const ocupacaoMediaAnterior = Math.round(ocupacaoAnteriorResult[0]?.ocupacaoMedia || 0);
+    
+    // Calcular crescimento de ocupação
+    const crescimentoOcupacao = ocupacaoMediaAnterior > 0 
+      ? Math.round(((ocupacaoMedia - ocupacaoMediaAnterior) / ocupacaoMediaAnterior) * 100) 
+      : 0;
+    
+    // Calcular receita total (R$28 por aluno) do mês atual
+    const receitaResult = await db.select({
+      total: sql`COALESCE(SUM(${schema.aulas.alunosPresentes} * 28), 0)`.mapWith(Number)
+    })
+    .from(schema.aulas)
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${dataInicioSQL}`),
+        lte(schema.aulas.data, sql`${dataFimSQL}`),
+        gt(schema.aulas.alunosPresentes, 0)
+      )
+    );
+    
+    const receitaTotal = Math.round(receitaResult[0]?.total || 0);
+    
+    // Calcular receita total do mês anterior
+    const receitaAnteriorResult = await db.select({
+      total: sql`COALESCE(SUM(${schema.aulas.alunosPresentes} * 28), 0)`.mapWith(Number)
+    })
+    .from(schema.aulas)
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${mesAnteriorDataInicioSQL}`),
+        lte(schema.aulas.data, sql`${mesAnteriorDataFimSQL}`),
+        gt(schema.aulas.alunosPresentes, 0)
+      )
+    );
+    
+    const receitaTotalAnterior = Math.round(receitaAnteriorResult[0]?.total || 0);
+    
+    // Calcular crescimento de receita
+    const crescimentoReceita = receitaTotalAnterior > 0 
+      ? Math.round(((receitaTotal - receitaTotalAnterior) / receitaTotalAnterior) * 100) 
+      : 0;
+    
+    // Calcular custos e resultado líquido
+    // Custo = R$78 fixo + (valor cargo) + (alunos × mult. patente)
+    const custosQuery = await db.select({
+      custosFixos: sql`COALESCE(COUNT(DISTINCT ${schema.aulas.id}) * 78, 0)`.mapWith(Number),
+      custosCargos: sql`COALESCE(SUM(${schema.cargos.valorHoraAula}), 0)`.mapWith(Number),
+      custosPatentes: sql`COALESCE(SUM(${schema.aulas.alunosPresentes} * ${schema.patentes.multiplicadorPorAluno}), 0)`.mapWith(Number)
+    })
+    .from(schema.aulas)
+    .innerJoin(schema.aulaProfessores, eq(schema.aulas.id, schema.aulaProfessores.aulaId))
+    .innerJoin(schema.cargos, eq(schema.aulaProfessores.cargoId, schema.cargos.id))
+    .innerJoin(schema.patentes, eq(schema.aulaProfessores.patenteId, schema.patentes.id))
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${dataInicioSQL}`),
+        lte(schema.aulas.data, sql`${dataFimSQL}`),
+        gt(schema.aulas.alunosPresentes, 0)
+      )
+    );
+    
+    const custoTotal = Math.round(
+      (custosQuery[0]?.custosFixos || 0) + 
+      (custosQuery[0]?.custosCargos || 0) + 
+      (custosQuery[0]?.custosPatentes || 0)
+    );
+    
+    // Calcular custos do mês anterior
+    const custosAnteriorQuery = await db.select({
+      custosFixos: sql`COALESCE(COUNT(DISTINCT ${schema.aulas.id}) * 78, 0)`.mapWith(Number),
+      custosCargos: sql`COALESCE(SUM(${schema.cargos.valorHoraAula}), 0)`.mapWith(Number),
+      custosPatentes: sql`COALESCE(SUM(${schema.aulas.alunosPresentes} * ${schema.patentes.multiplicadorPorAluno}), 0)`.mapWith(Number)
+    })
+    .from(schema.aulas)
+    .innerJoin(schema.aulaProfessores, eq(schema.aulas.id, schema.aulaProfessores.aulaId))
+    .innerJoin(schema.cargos, eq(schema.aulaProfessores.cargoId, schema.cargos.id))
+    .innerJoin(schema.patentes, eq(schema.aulaProfessores.patenteId, schema.patentes.id))
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${mesAnteriorDataInicioSQL}`),
+        lte(schema.aulas.data, sql`${mesAnteriorDataFimSQL}`),
+        gt(schema.aulas.alunosPresentes, 0)
+      )
+    );
+    
+    const custoTotalAnterior = Math.round(
+      (custosAnteriorQuery[0]?.custosFixos || 0) + 
+      (custosAnteriorQuery[0]?.custosCargos || 0) + 
+      (custosAnteriorQuery[0]?.custosPatentes || 0)
+    );
+    
+    // Calcular resultado líquido
+    const resultadoLiquido = receitaTotal - custoTotal;
+    const resultadoLiquidoAnterior = receitaTotalAnterior - custoTotalAnterior;
+    
+    // Calcular crescimento do resultado
+    const crescimentoResultado = resultadoLiquidoAnterior > 0 
+      ? Math.round(((resultadoLiquido - resultadoLiquidoAnterior) / resultadoLiquidoAnterior) * 100) 
+      : 0;
+    
+    return {
+      totalAulas,
+      ocupacaoMedia,
+      receitaTotal,
+      resultadoLiquido,
+      crescimentoAulas,
+      crescimentoOcupacao,
+      crescimentoReceita,
+      crescimentoResultado
+    };
+  },
+
+  async getHorariosAulas(mesAno: string) {
+    try {
+      // Processar mesAno no formato "MM/YYYY"
+      const [mes, ano] = mesAno.split('/').map(Number);
+      
+      // Calcular primeiro e último dia do mês
+      const dataInicio = new Date(ano, mes - 1, 1);
+      const dataFim = new Date(ano, mes, 0);
+      
+      // Formatação para consulta SQL
+      const dataInicioSQL = dataInicio.toISOString().split('T')[0];
+      const dataFimSQL = dataFim.toISOString().split('T')[0];
+      
+      // Obter todas as aulas do mês agrupadas por horário e dia da semana
+      const aulasGrouped = await db.select({
+        id: schema.aulas.id,
+        modalidade: schema.modalidades.nome,
+        diaSemana: sql<number>`EXTRACT(DOW FROM ${schema.aulas.data}::timestamp)`,
+        horaInicio: schema.aulas.horaInicio,
+        quantidadeAulas: count(),
+        mediaAlunos: avg(schema.aulas.alunosPresentes),
+        somaAlunos: sum(schema.aulas.alunosPresentes),
+        capacidade: schema.aulas.capacidade
+      })
+      .from(schema.aulas)
+      .innerJoin(schema.modalidades, eq(schema.aulas.modalidadeId, schema.modalidades.id))
+      .where(
+        and(
+          gte(schema.aulas.data, sql`${dataInicioSQL}`),
+          lte(schema.aulas.data, sql`${dataFimSQL}`)
+        )
+      )
+      .groupBy(
+        schema.aulas.id,
+        schema.modalidades.nome,
+        sql`EXTRACT(DOW FROM ${schema.aulas.data}::timestamp)`,
+        schema.aulas.horaInicio,
+        schema.aulas.capacidade
+      );
+      
+      // Processar e formatar os dados para a grade de horários
+      // Converter o dia da semana (0 = domingo, 1 = segunda, etc.) para o formato esperado
+      const diasSemanaMap = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+      
+      // Preparar estrutura de dados: { horario: { diaSemana: dados } }
+      const horariosGrid: Record<string, Record<string, any>> = {};
+      
+      const horarios = ["08:00", "12:00", "16:00", "19:00"];
+      horarios.forEach(horario => {
+        horariosGrid[horario] = {};
+        diasSemanaMap.slice(1, 7).forEach(dia => { // Excluir domingo
+          horariosGrid[horario][dia] = null;
+        });
+      });
+      
+      // Obter valores fixos do sistema
+      const valoresFixos = await this.getValoresFixos();
+      const receitaPorAluno = parseFloat(String(valoresFixos.receitaPorAluno));
+      const custoFixoPorAula = parseFloat(String(valoresFixos.custoFixoPorAula));
+      
+      // Preencher a grade com os dados das aulas
+      for (const aula of aulasGrouped) {
+        const diaSemana = diasSemanaMap[aula.diaSemana];
+        const horario = aula.horaInicio;
+        
+        // Ignorar domingos e horários não listados
+        if (diaSemana !== "Domingo" && horarios.includes(horario)) {
+          // Calcular ocupação
+          const mediaAlunos = Number(aula.mediaAlunos) || 0;
+          const capacidade = Number(aula.capacidade);
+          const ocupacao = capacidade > 0 ? Math.round((mediaAlunos / capacidade) * 100) : 0;
+          
+          // Calcular receita e custo
+          const somaAlunos = Number(aula.somaAlunos) || 0;
+          const numAulas = Number(aula.quantidadeAulas) || 0;
+          
+          // Receita = alunos × valor por aluno
+          const receita = somaAlunos * receitaPorAluno;
+          
+          // Custo aproximado = numAulas * (custoFixo + valorCargo médio + mediaAlunos * multPatente médio)
+          const custoBase = custoFixoPorAula;
+          const custoCargoMedio = 100; // Valor médio aproximado dos cargos
+          const custoPatenteMedio = mediaAlunos * 2.5; // Multiplicador médio aproximado das patentes
+          
+          const custo = numAulas * (custoBase + custoCargoMedio + custoPatenteMedio);
+        
+        horariosGrid[horario][diaSemana] = {
+          id: `${horario}-${diaSemana}-${aula.modalidade}`,
+          modalidade: aula.modalidade,
+          numAulas,
+          mediaAlunos,
+          receita,
+          custo,
+          resultado: receita - custo,
+          ocupacao
+        };
+      }
+    }
+    
+    return horariosGrid;
+    } catch (error) {
+      console.error("Erro ao obter horários de aulas:", error);
+      return {};
+    }
+  },
+
+  async getClassDetail(classId: string, mesAno: string) {
+    // Extrair modalidade, dia e horário do ID composto
+    const [horario, diaSemana, modalidade] = classId.split('-');
+    
+    // Processar mesAno no formato "MM/YYYY"
+    const [mes, ano] = mesAno.split('/').map(Number);
+    
+    // Calcular primeiro e último dia do mês
+    const dataInicio = new Date(ano, mes - 1, 1);
+    const dataFim = new Date(ano, mes, 0);
+    
+    // Formatação para consulta SQL
+    const dataInicioSQL = dataInicio.toISOString().split('T')[0];
+    const dataFimSQL = dataFim.toISOString().split('T')[0];
+    
+    // Mapear dia da semana para número
+    const diaSemanaMap: Record<string, number> = {
+      "Segunda": 1,
+      "Terça": 2,
+      "Quarta": 3,
+      "Quinta": 4, 
+      "Sexta": 5,
+      "Sábado": 6
+    };
+    
+    // Obter aulas correspondentes
+    const aulas = await db.select({
+      id: schema.aulas.id,
+      data: schema.aulas.data,
+      horaInicio: schema.aulas.horaInicio,
+      capacidade: schema.aulas.capacidade,
+      modalidade: schema.modalidades.nome,
+      diaSemana: sql<number>`EXTRACT(DOW FROM ${schema.aulas.data}::timestamp)`
+    })
+    .from(schema.aulas)
+    .innerJoin(schema.modalidades, eq(schema.aulas.modalidadeId, schema.modalidades.id))
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${dataInicioSQL}`),
+        lte(schema.aulas.data, sql`${dataFimSQL}`),
+        eq(schema.aulas.horaInicio, horario),
+        eq(schema.modalidades.nome, modalidade),
+        sql`EXTRACT(DOW FROM ${schema.aulas.data}::timestamp) = ${diaSemanaMap[diaSemana]}`
+      )
+    );
+    
+    if (aulas.length === 0) {
+      throw new Error("Detalhes da aula não encontrados");
+    }
+    
+    // Obter aulas com os alunos presentes
+    const aulaIds = aulas.map(a => a.id);
+    
+    // Calcular média de alunos
+    const aulasPresenca = await db.select({
+      id: schema.aulas.id,
+      alunosPresentes: schema.aulas.alunosPresentes
+    })
+    .from(schema.aulas)
+    .where(
+      sql`${schema.aulas.id} IN (${aulaIds.join(',')})`
+    );
+    
+    const totalAlunos = aulasPresenca.reduce((sum, a) => sum + (a.alunosPresentes || 0), 0);
+    const mediaAlunos = aulaIds.length > 0 ? Math.round(totalAlunos / aulaIds.length) : 0;
+    const ocupacao = aulas[0].capacidade > 0 ? Math.round((mediaAlunos / aulas[0].capacidade) * 100) : 0;
+    
+    // Obter valores fixos do sistema
+    const valoresFixos = await this.getValoresFixos();
+    const receitaPorAluno = parseFloat(valoresFixos.receitaPorAluno);
+    const custoFixoPorAula = parseFloat(valoresFixos.custoFixoPorAula);
+    
+    // Calcular valores financeiros
+    const receitaPorAula = mediaAlunos * receitaPorAluno;
+    const receitaMensal = receitaPorAula * aulaIds.length;
+    
+    // Obter professores, cargos e patentes das aulas
+    const professores = await db.select({
+      professorId: schema.professores.id,
+      professorNome: schema.professores.nome,
+      cargoNome: schema.cargos.nome,
+      patenteNome: schema.patentes.nome,
+      valorHora: schema.cargos.valorHoraAula,
+      multiplicador: schema.patentes.multiplicadorPorAluno
+    })
+    .from(schema.aulaProfessores)
+    .innerJoin(schema.professores, eq(schema.aulaProfessores.professorId, schema.professores.id))
+    .innerJoin(schema.cargos, eq(schema.aulaProfessores.cargoId, schema.cargos.id))
+    .innerJoin(schema.patentes, eq(schema.aulaProfessores.patenteId, schema.patentes.id))
+    .where(
+      sql`${schema.aulaProfessores.aulaId} IN (${aulaIds.join(',')})`
+    )
+    .groupBy(
+      schema.professores.id,
+      schema.professores.nome,
+      schema.cargos.nome,
+      schema.patentes.nome,
+      schema.cargos.valorHoraAula,
+      schema.patentes.multiplicadorPorAluno
+    );
+    
+    // Calcular custos
+    const custoFixo = custoFixoPorAula;
+    const custoCargos = professores.reduce((sum, p) => sum + Number(p.valorHora), 0);
+    const custoPatentes = professores.reduce((sum, p) => sum + (mediaAlunos * Number(p.multiplicador)), 0);
+    
+    const custoPorAula = custoFixo + custoCargos + custoPatentes;
+    const custoMensal = custoPorAula * aulaIds.length;
+    
+    const resultadoPorAula = receitaPorAula - custoPorAula;
+    const resultadoMensal = receitaMensal - custoMensal;
+    
+    // Obter detalhes de cada aula individual com alunos presentes
+    const aulasIndividuais = await Promise.all(
+      aulaIds.map(async (aulaId) => {
+        const aulaPresenca = aulasPresenca.find(a => a.id === aulaId);
+        const quantidadeAlunos = aulaPresenca?.alunosPresentes || 0;
+        const receita = quantidadeAlunos * receitaPorAluno;
+        const custo = custoFixo + custoCargos + professores.reduce((sum, p) => sum + (quantidadeAlunos * Number(p.multiplicador)), 0);
+        
+        const aula = aulas.find(a => a.id === aulaId);
+        
+        return {
+          data: aula ? new Date(aula.data).toLocaleDateString('pt-BR') : '',
+          alunos: quantidadeAlunos,
+          receita,
+          custo,
+          resultado: receita - custo
+        };
+      })
+    );
+    
+    // Calcular valor total para cada professor
+    const professoresDetalhados = professores.map(p => {
+      const valorHoraAula = Number(p.valorHora);
+      const multiplicadorAluno = Number(p.multiplicador);
+      const valorTotal = valorHoraAula + (mediaAlunos * multiplicadorAluno);
+      
+      return {
+        id: p.professorId,
+        nome: p.professorNome,
+        cargo: p.cargoNome,
+        patente: p.patenteNome,
+        valorHora: valorHoraAula,
+        multiplicadorAluno,
+        valorTotal
+      };
+    });
+    
+    return {
+      info: {
+        modalidade,
+        diaSemana,
+        horario,
+        capacidade: aulas[0].capacidade,
+        mediaAlunos,
+        ocupacao
+      },
+      valores: {
+        receitaPorAula,
+        custoPorAula,
+        receitaMensal,
+        custoMensal,
+        resultadoPorAula,
+        resultadoMensal
+      },
+      aulas: aulasIndividuais,
+      professores: professoresDetalhados
+    };
+  },
+
+  // Professores - relatórios e métricas
+  async getProfessoresDestaque(mesAno: string, limit: number = 3) {
+    // Processar mesAno no formato "MM/YYYY"
+    const [mes, ano] = mesAno.split('/').map(Number);
+    
+    // Calcular primeiro e último dia do mês
+    const dataInicio = new Date(ano, mes - 1, 1);
+    const dataFim = new Date(ano, mes, 0);
+    
+    // Formatação para consulta SQL
+    const dataInicioSQL = dataInicio.toISOString().split('T')[0];
+    const dataFimSQL = dataFim.toISOString().split('T')[0];
+    
+    // Obter professores com mais aulas e alunos no período
+    const professores = await db.select({
+      id: schema.professores.id,
+      nome: schema.professores.nome,
+      email: schema.professores.email,
+      totalAulas: count(schema.aulaProfessores.id),
+      totalAlunos: sum(schema.aulas.alunosPresentes),
+    })
+    .from(schema.professores)
+    .innerJoin(schema.aulaProfessores, eq(schema.professores.id, schema.aulaProfessores.professorId))
+    .innerJoin(schema.aulas, eq(schema.aulaProfessores.aulaId, schema.aulas.id))
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${dataInicioSQL}`),
+        lte(schema.aulas.data, sql`${dataFimSQL}`),
+        eq(schema.professores.role, 'professor'),
+        gt(schema.aulas.alunosPresentes, 0)
+      )
+    )
+    .groupBy(schema.professores.id)
+    .orderBy(desc(sql`SUM(${schema.aulas.alunosPresentes})`))
+    .limit(limit);
+    
+    // Calcular média de alunos e valor a receber para cada professor
+    const professoresDetalhados = await Promise.all(
+      professores.map(async (professor) => {
+        // Obter cargos e patentes usados pelo professor
+        const cargosPatentes = await db.select({
+          cargoValor: schema.cargos.valorHoraAula,
+          patenteMultiplicador: schema.patentes.multiplicadorPorAluno,
+          aulaId: schema.aulaProfessores.aulaId
+        })
+        .from(schema.aulaProfessores)
+        .innerJoin(schema.cargos, eq(schema.aulaProfessores.cargoId, schema.cargos.id))
+        .innerJoin(schema.patentes, eq(schema.aulaProfessores.patenteId, schema.patentes.id))
+        .innerJoin(schema.aulas, eq(schema.aulaProfessores.aulaId, schema.aulas.id))
+        .where(
+          and(
+            eq(schema.aulaProfessores.professorId, professor.id),
+            gte(schema.aulas.data, sql`${dataInicioSQL}`),
+            lte(schema.aulas.data, sql`${dataFimSQL}`)
+          )
+        );
+        
+        // Obter aulas com alunos presentes
+        const aulasComAlunos = await db.select({
+          id: schema.aulas.id,
+          alunosPresentes: schema.aulas.alunosPresentes
+        })
+        .from(schema.aulas)
+        .where(
+          and(
+            gte(schema.aulas.data, sql`${dataInicioSQL}`),
+            lte(schema.aulas.data, sql`${dataFimSQL}`),
+            gt(schema.aulas.alunosPresentes, 0)
+          )
+        );
+        
+        // Calcular valor a receber
+        let valorTotal = 0;
+        
+        // Para cada aula com cargo/patente
+        cargosPatentes.forEach(cp => {
+          // Encontrar aula correspondente
+          const aula = aulasComAlunos.find(a => a.id === cp.aulaId);
+          if (aula && aula.alunosPresentes > 0) {
+            // Valor do cargo + (alunos × multiplicador da patente)
+            valorTotal += Number(cp.cargoValor) + (aula.alunosPresentes * Number(cp.patenteMultiplicador));
+          } else {
+            // Se não tiver alunos presentes, só considera o valor do cargo
+            valorTotal += Number(cp.cargoValor);
+          }
+        });
+        
+        // Média de alunos
+        const mediaAlunos = professor.totalAlunos && professor.totalAulas 
+          ? Math.round(professor.totalAlunos / professor.totalAulas) 
+          : 0;
+        
+        return {
+          id: professor.id,
+          nome: professor.nome,
+          email: professor.email,
+          totalAulas: professor.totalAulas || 0,
+          totalAlunos: professor.totalAlunos || 0,
+          mediaAlunos,
+          valorReceber: valorTotal
+        };
+      })
+    );
+    
+    return professoresDetalhados;
+  },
+
+  async getProfessorById(professorId: number, mesAno: string) {
+    // Processar mesAno no formato "MM/YYYY"
+    const [mes, ano] = mesAno.split('/').map(Number);
+    
+    // Calcular primeiro e último dia do mês
+    const dataInicio = new Date(ano, mes - 1, 1);
+    const dataFim = new Date(ano, mes, 0);
+    
+    // Formatação para consulta SQL
+    const dataInicioSQL = dataInicio.toISOString().split('T')[0];
+    const dataFimSQL = dataFim.toISOString().split('T')[0];
+    
+    // Obter dados básicos do professor
+    const professor = await db.query.professores.findFirst({
+      where: eq(schema.professores.id, professorId)
+    });
+    
+    if (!professor) {
+      return null;
+    }
+    
+    // Obter contagem de aulas e alunos
+    const metricas = await db.select({
+      totalAulas: count(schema.aulaProfessores.id),
+      totalAlunos: sum(schema.aulas.alunosPresentes),
+    })
+    .from(schema.aulaProfessores)
+    .innerJoin(schema.aulas, eq(schema.aulaProfessores.aulaId, schema.aulas.id))
+    .where(
+      and(
+        eq(schema.aulaProfessores.professorId, professor.id),
+        gte(schema.aulas.data, sql`${dataInicioSQL}`),
+        lte(schema.aulas.data, sql`${dataFimSQL}`)
+      )
+    );
+    
+    const totalAulas = metricas[0]?.totalAulas || 0;
+    const totalAlunos = metricas[0]?.totalAlunos || 0;
+    const mediaAlunos = totalAulas > 0 ? Math.round(totalAlunos / totalAulas) : 0;
+    
+    // Obter cargos e patentes usados pelo professor
+    const cargosPatentes = await db.select({
+      cargoValor: schema.cargos.valorHoraAula,
+      patenteMultiplicador: schema.patentes.multiplicadorPorAluno,
+      aulaId: schema.aulaProfessores.aulaId
+    })
+    .from(schema.aulaProfessores)
+    .innerJoin(schema.cargos, eq(schema.aulaProfessores.cargoId, schema.cargos.id))
+    .innerJoin(schema.patentes, eq(schema.aulaProfessores.patenteId, schema.patentes.id))
+    .innerJoin(schema.aulas, eq(schema.aulaProfessores.aulaId, schema.aulas.id))
+    .where(
+      and(
+        eq(schema.aulaProfessores.professorId, professor.id),
+        gte(schema.aulas.data, sql`${dataInicioSQL}`),
+        lte(schema.aulas.data, sql`${dataFimSQL}`)
+      )
+    );
+    
+    // Obter aulas com alunos presentes
+    const aulasComAlunos = await db.select({
+      id: schema.aulas.id,
+      alunosPresentes: schema.aulas.alunosPresentes
+    })
+    .from(schema.aulas)
+    .where(
+      and(
+        gte(schema.aulas.data, sql`${dataInicioSQL}`),
+        lte(schema.aulas.data, sql`${dataFimSQL}`)
+      )
+    );
+    
+    // Calcular valor a receber
+    let valorReceber = 0;
+    
+    // Para cada aula com cargo/patente
+    cargosPatentes.forEach(cp => {
+      // Encontrar aula correspondente
+      const aula = aulasComAlunos.find(a => a.id === cp.aulaId);
+      if (aula && aula.alunosPresentes > 0) {
+        // Valor do cargo + (alunos × multiplicador da patente)
+        valorReceber += Number(cp.cargoValor) + (aula.alunosPresentes * Number(cp.patenteMultiplicador));
+      } else {
+        // Se não tiver alunos presentes, só considera o valor do cargo
+        valorReceber += Number(cp.cargoValor);
+      }
+    });
+    
+    return {
+      id: professor.id,
+      nome: professor.nome,
+      email: professor.email,
+      totalAulas,
+      totalAlunos,
+      mediaAlunos,
+      valorReceber
+    };
+  },
+
+  async getProfessorAulas(professorId: number, mesAno: string) {
+    // Processar mesAno no formato "MM/YYYY"
+    const [mes, ano] = mesAno.split('/').map(Number);
+    
+    // Calcular primeiro e último dia do mês
+    const dataInicio = new Date(ano, mes - 1, 1);
+    const dataFim = new Date(ano, mes, 0);
+    
+    // Formatação para consulta SQL
+    const dataInicioSQL = dataInicio.toISOString().split('T')[0];
+    const dataFimSQL = dataFim.toISOString().split('T')[0];
+    
+    // Obter aulas do professor com cargo, patente e modalidade
+    const aulas = await db.select({
+      aulaId: schema.aulas.id,
+      data: schema.aulas.data,
+      horaInicio: schema.aulas.horaInicio,
+      alunosPresentes: schema.aulas.alunosPresentes,
+      modalidade: schema.modalidades.nome,
+      cargo: schema.cargos.nome,
+      patente: schema.patentes.nome,
+      valorHora: schema.cargos.valorHoraAula,
+      multiplicadorAluno: schema.patentes.multiplicadorPorAluno
+    })
+    .from(schema.aulaProfessores)
+    .innerJoin(schema.aulas, eq(schema.aulaProfessores.aulaId, schema.aulas.id))
+    .innerJoin(schema.modalidades, eq(schema.aulas.modalidadeId, schema.modalidades.id))
+    .innerJoin(schema.cargos, eq(schema.aulaProfessores.cargoId, schema.cargos.id))
+    .innerJoin(schema.patentes, eq(schema.aulaProfessores.patenteId, schema.patentes.id))
+    .where(
+      and(
+        eq(schema.aulaProfessores.professorId, professorId),
+        gte(schema.aulas.data, sql`${dataInicioSQL}`),
+        lte(schema.aulas.data, sql`${dataFimSQL}`)
+      )
+    )
+    .orderBy(schema.aulas.data, schema.aulas.horaInicio);
+    
+    // Montar resultado final
+    const aulasDetalhadas = aulas.map(aula => {
+      const quantidadeAlunos = aula.alunosPresentes || 0;
+      
+      // Calcular valor total
+      const valorHora = Number(aula.valorHora);
+      const multiplicador = Number(aula.multiplicadorAluno);
+      const valorTotal = valorHora + (quantidadeAlunos * multiplicador);
+      
+      return {
+        id: aula.aulaId,
+        data: new Date(aula.data).toLocaleDateString('pt-BR'),
+        horaInicio: aula.horaInicio,
+        modalidade: aula.modalidade,
+        cargo: aula.cargo,
+        patente: aula.patente,
+        valorHora,
+        multiplicadorAluno: multiplicador,
+        quantidadeAlunos,
+        valorTotal
+      };
+    });
+    
+    return aulasDetalhadas;
+  },
+  
+  // Funções para os registros financeiros
+  async getFinanceiros(aulaId?: number) {
+    if (aulaId) {
+      return await db.query.financeiros.findMany({
+        where: eq(schema.financeiros.aulaId, aulaId),
+        with: {
+          aula: {
+            with: {
+              modalidade: true
+            }
+          }
+        }
+      });
+    }
+    
+    return await db.query.financeiros.findMany({
+      with: {
+        aula: {
+          with: {
+            modalidade: true
+          }
+        }
+      },
+      orderBy: [desc(schema.financeiros.createdAt)]
+    });
+  },
+
+  async criarFinanceiro(data: schema.FinanceiroInsert) {
+    const [financeiro] = await db.insert(schema.financeiros).values(data).returning();
+    return financeiro;
+  },
+
+  async atualizarFinanceiro(id: number, data: Partial<schema.FinanceiroInsert>) {
+    const [financeiro] = await db.update(schema.financeiros)
+      .set(data)
+      .where(eq(schema.financeiros.id, id))
+      .returning();
+    return financeiro;
+  },
+
+  async deletarFinanceiro(id: number) {
+    await db.delete(schema.financeiros).where(eq(schema.financeiros.id, id));
+  }
+};

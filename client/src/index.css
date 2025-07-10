@@ -1,0 +1,323 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    /* CF98 Laranja - #ff6600 (HSL: 24 100% 50%) */
+    --primary: 24 100% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 222.2 37.6% 97.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 24 100% 50%;
+
+    --radius: 0.5rem;
+
+    /* Cores do design reference */
+    --success: 142.1 70.6% 45.3%;
+    --warning: 48 96.5% 53.1%;
+    --danger: 0 84.2% 60.2%;
+    --info: 262.1 83.3% 57.8%;
+  }
+
+  .dark {
+    /* Background muito mais escuro */
+    --background: 222.2 84% 1.5%;
+    --foreground: 210 40% 98%;
+
+    /* Cards muito mais escuros */
+    --card: 222.2 84% 3.5%;
+    --card-foreground: 210 40% 98%;
+
+    /* Popover muito mais escuro */
+    --popover: 222.2 84% 3.5%;
+    --popover-foreground: 210 40% 98%;
+
+    /* CF98 Laranja no tema escuro - mantido o mesmo */
+    --primary: 24 100% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secundários muito mais escuros */
+    --secondary: 222.2 84% 6%;
+    --secondary-foreground: 210 40% 98%;
+
+    /* Muted muito mais escuro */
+    --muted: 222.2 84% 6%;
+    --muted-foreground: 215 20.2% 80%;
+
+    /* Accent muito mais escuro */
+    --accent: 222.2 84% 6%;
+    --accent-foreground: 210 40% 98%;
+
+    /* Destrutivo mais escuro */
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Bordas mais definidas no tema escuro */
+    --border: 222.2 84% 15%;
+    --input: 222.2 84% 8%;
+    --ring: 24 100% 50%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground transition-colors duration-300;
+  }
+}
+
+@layer components {
+  /* Estilo para os menus suspensos no modo escuro */
+  .dark [cmdk-root] {
+    @apply bg-card border-[#ff6600]/20 shadow-md;
+  }
+
+  .dark [cmdk-input] {
+    @apply bg-card text-white;
+  }
+
+  .dark [cmdk-list] {
+    @apply bg-card;
+  }
+
+  .dark [cmdk-item] {
+    @apply text-white;
+  }
+
+  .dark [cmdk-item][data-selected="true"] {
+    @apply bg-[#ff6600]/10 text-[#ff6600];
+  }
+
+  /* Estilo personalizado para o SelectContent e SelectItem no tema escuro */
+  .dark .select-content {
+    @apply bg-card border-[#ff6600]/20 shadow-md;
+  }
+
+  .dark .select-item {
+    @apply text-white hover:bg-[#ff6600]/10 hover:text-[#ff6600] focus:bg-[#ff6600]/10 focus:text-[#ff6600];
+  }
+
+  .dark .select-item[data-highlighted="true"] {
+    @apply bg-[#ff6600]/10 text-[#ff6600];
+  }
+
+  .dark .select-item[data-state="checked"] {
+    @apply bg-[#ff6600]/20 text-[#ff6600];
+  }
+
+  .sidebar-link {
+    @apply flex items-center text-gray-300 py-2 px-3 rounded hover:bg-gray-700 dark:hover:bg-gray-700 mb-1 transition;
+  }
+
+  .sidebar-link-active {
+    @apply flex items-center bg-primary text-white py-2 px-3 rounded mb-1 transition;
+  }
+
+  .card-dashboard {
+    @apply bg-card text-card-foreground rounded-lg shadow p-6 border-l-4 border-l-primary;
+  }
+
+  .card-title {
+    @apply text-sm text-muted-foreground mb-1;
+  }
+
+  .card-value {
+    @apply text-2xl font-bold text-white;
+  }
+
+  .card-growth {
+    @apply text-sm text-green-500 mt-1;
+  }
+
+  .card-icon {
+    @apply p-2 rounded-md;
+  }
+
+  .btn-primary {
+    @apply bg-primary hover:bg-primary-600 text-white px-4 py-2 rounded;
+  }
+
+  .form-label {
+    @apply block text-sm font-medium text-foreground mb-1;
+  }
+
+  .form-input {
+    @apply bg-background border border-input text-foreground rounded-md p-2 w-full focus:outline-none focus:ring-primary focus:border-primary;
+  }
+
+  /* Estilos específicos para as tabelas - modo dark */
+  .dark table {
+    @apply bg-card border-border;
+  }
+
+  .dark thead {
+    @apply bg-muted border-muted;
+  }
+  
+  .dark tbody,
+  .dark tr {
+    @apply bg-card border-muted;
+  }
+  
+  .dark th {
+    @apply text-primary font-bold;
+  }
+  
+  .dark td {
+    @apply text-white border-muted;
+  }
+
+  .table-cell-head {
+    @apply px-4 py-3 border-b-2 border-muted bg-muted text-left text-xs font-semibold uppercase tracking-wider;
+  }
+
+  .table-cell {
+    @apply px-4 py-4 whitespace-nowrap text-sm;
+  }
+
+  /* Estilos específicos para o grid de horários - modo dark */
+  .dark [role="grid"] {
+    @apply bg-background border-muted;
+  }
+  
+  .dark [role="row"] {
+    @apply bg-background border-muted;
+  }
+  
+  .dark [role="cell"] {
+    @apply bg-card text-white border-muted;
+  }
+  
+  /* Dashboard no modo dark - cards mais escuros */
+  .dark .card-dashboard {
+    @apply bg-card text-card-foreground shadow-md;
+  }
+  
+  /* Campos brancos na dashboard */
+  .dark select,
+  .dark input,
+  .dark textarea,
+  .dark button {
+    @apply bg-card border-border text-foreground;
+  }
+  
+  /* Adicionar mais contraste aos cabeçalhos */
+  .dark h1, 
+  .dark h2, 
+  .dark h3 {
+    @apply text-primary font-bold;
+  }
+  
+  /* Adicionar laranja nos títulos por toda a aplicação */
+  .section-title {
+    @apply text-primary font-bold;
+  }
+  
+  .page-title {
+    @apply text-primary font-bold text-2xl mb-6;
+  }
+  
+  /* Títulos em toda a aplicação no modo dark */
+  .dark .title, 
+  .dark .card-title, 
+  .dark .section-title,
+  .dark .page-title,
+  .dark .dashboard-title,
+  .dark .modal-title,
+  .dark .widget-title {
+    @apply text-primary font-bold;
+  }
+  
+  /* Melhorias para tabela de professores */
+  .dark .teacher-table th {
+    @apply bg-background text-primary font-bold border-muted py-3;
+  }
+  
+  .dark .teacher-table td {
+    @apply bg-card text-white border-muted;
+  }
+  
+  .dark .teacher-table tr:nth-child(even) td {
+    @apply bg-background;
+  }
+  
+  /* Valores de dinheiro em verde e laranja */
+  .dark .value-money {
+    @apply text-primary font-bold;
+  }
+  
+  .dark .positive-value {
+    @apply text-green-400 font-bold;
+  }
+  
+  .dark .negative-value {
+    @apply text-red-400 font-bold;
+  }
+  
+  /* Links e botões de ação */
+  .dark .action-link,
+  .dark .details-link {
+    @apply text-primary hover:text-primary-foreground;
+  }
+  
+  /* Modal de detalhes de aula no modo dark */
+  .dark .modal-title {
+    @apply text-primary font-bold;
+  }
+  
+  .dark .modal-subtitle {
+    @apply text-primary;
+  }
+  
+  .dark .modal-content {
+    @apply bg-card text-white;
+  }
+  
+  .dark .info-box {
+    @apply bg-background border border-border;
+  }
+  
+  .dark .info-label {
+    @apply text-primary text-xs;
+  }
+  
+  .dark .info-value {
+    @apply text-white font-medium;
+  }
+  
+  .dark .table-header {
+    @apply bg-background text-primary font-bold border-muted;
+  }
+  
+  .dark .table-cell {
+    @apply bg-card text-white border-muted;
+  }
+  
+  .dark .close-button {
+    @apply bg-primary text-white hover:bg-primary-foreground;
+  }
+}
